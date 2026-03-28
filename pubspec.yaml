@@ -69,6 +69,9 @@ dependencies:
   # File picker (for selecting recording files to upload)
   file_picker: ^8.1.2
 
+  # Path utilities (basename, extension)
+  path: ^1.9.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
