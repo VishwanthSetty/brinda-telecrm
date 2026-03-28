@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/utils/date_formatter.dart';
@@ -28,7 +28,8 @@ class _CallDetailSheetState extends ConsumerState<CallDetailSheet> {
   final _noteCtrl = TextEditingController();
   String? _selectedDisposition;
   bool _saving = false;
-  bool _loadingRecording = false;
+  String? _recordingUrl;
+  bool _fetchingRecordingUrl = false;
 
   @override
   void initState() {
@@ -53,6 +54,7 @@ class _CallDetailSheetState extends ConsumerState<CallDetailSheet> {
           _selectedDisposition = log.disposition;
           _loading = false;
         });
+        if (log.hasRecording) _fetchRecordingUrl();
       }
     } catch (e) {
       if (mounted) setState(() { _error = e.toString(); _loading = false; });
@@ -82,22 +84,17 @@ class _CallDetailSheetState extends ConsumerState<CallDetailSheet> {
     }
   }
 
-  Future<void> _playRecording() async {
+  Future<void> _fetchRecordingUrl() async {
     if (_log?.recordingId == null) return;
-    setState(() => _loadingRecording = true);
+    setState(() => _fetchingRecordingUrl = true);
     try {
       final result = await RecordingService(ref.read(apiClientProvider))
           .getUrl(_log!.recordingId!);
-      final uri = Uri.parse(result.url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) AppSnackbar.showError(context, 'Cannot open recording');
-      }
+      if (mounted) setState(() => _recordingUrl = result.url);
     } catch (e) {
       if (mounted) AppSnackbar.showError(context, 'Failed to load recording');
     } finally {
-      if (mounted) setState(() => _loadingRecording = false);
+      if (mounted) setState(() => _fetchingRecordingUrl = false);
     }
   }
 
@@ -205,10 +202,14 @@ class _CallDetailSheetState extends ConsumerState<CallDetailSheet> {
                     ),
                   ),
                   const Spacer(),
-                  if (log.hasRecording)
-                    _RecordingButton(
-                      loading: _loadingRecording,
-                      onTap: _playRecording,
+                  if (_fetchingRecordingUrl)
+                    const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.primaryMid,
+                      ),
                     ),
                 ],
               ),
@@ -239,6 +240,10 @@ class _CallDetailSheetState extends ConsumerState<CallDetailSheet> {
                 label: 'SIM',
                 value: 'SIM ${log.simSlot + 1}',
               ),
+              if (_recordingUrl != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                _InlinePlayer(url: _recordingUrl!),
+              ],
             ],
           ),
         ),
@@ -337,30 +342,125 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _RecordingButton extends StatelessWidget {
-  final bool loading;
-  final VoidCallback onTap;
+class _InlinePlayer extends StatefulWidget {
+  final String url;
+  const _InlinePlayer({required this.url});
 
-  const _RecordingButton({required this.loading, required this.onTap});
+  @override
+  State<_InlinePlayer> createState() => _InlinePlayerState();
+}
+
+class _InlinePlayerState extends State<_InlinePlayer> {
+  late final AudioPlayer _player;
+  bool _playing = false;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _player = AudioPlayer();
+    _player.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    _player.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+    _player.onPlayerStateChanged.listen((s) {
+      if (mounted) setState(() => _playing = s == PlayerState.playing);
+    });
+    _player.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() {
+          _playing = false;
+          _position = Duration.zero;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlayPause() async {
+    try {
+      if (_playing) {
+        await _player.pause();
+      } else if (_position > Duration.zero) {
+        await _player.resume();
+      } else {
+        await _player.play(UrlSource(widget.url));
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Playback failed');
+    }
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: loading ? null : onTap,
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(0, 36),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        side: const BorderSide(color: AppColors.primaryMid),
-        foregroundColor: AppColors.primary,
-      ),
-      icon: loading
-          ? const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primaryMid),
-            )
-          : const Icon(Icons.play_circle_outline, size: 16),
-      label: const Text('Play', style: TextStyle(fontSize: 13)),
+    if (_error != null) {
+      return Text(
+        _error!,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: AppColors.missed,
+        ),
+      );
+    }
+
+    final maxVal = _duration.inSeconds.toDouble();
+    final curVal = _position.inSeconds
+        .toDouble()
+        .clamp(0.0, maxVal > 0 ? maxVal : 1.0);
+
+    return Row(
+      children: [
+        IconButton(
+          icon: Icon(
+            _playing ? Icons.pause_circle_outline : Icons.play_circle_outline,
+            size: 32,
+            color: AppColors.primary,
+          ),
+          onPressed: _togglePlayPause,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+        ),
+        Expanded(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 2,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+              activeTrackColor: AppColors.primary,
+              thumbColor: AppColors.primary,
+              inactiveTrackColor: AppColors.divider,
+            ),
+            child: Slider(
+              value: curVal,
+              max: maxVal > 0 ? maxVal : 1.0,
+              onChanged: maxVal > 0
+                  ? (v) => _player.seek(Duration(seconds: v.toInt()))
+                  : null,
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.xs),
+        Text(
+          '${_fmt(_position)} / ${_fmt(_duration)}',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
     );
   }
 }
