@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-const _baseUrl = 'http://52.66.179.65';
+const _baseUrl = 'https://www.brindapublications.com';
 const _tokenKey = 'jwt_token';
 
 class ApiClient {
