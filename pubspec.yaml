@@ -60,6 +60,15 @@ dependencies:
   # URL launcher (for recording playback)
   url_launcher: ^6.3.1
 
+  # Audio player (for in-app recording playback)
+  audioplayers: ^6.0.0
+
+  # Runtime permissions
+  permission_handler: ^11.3.1
+
+  # File picker (for selecting recording files to upload)
+  file_picker: ^8.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
