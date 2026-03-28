@@ -1,9 +1,11 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../data/models/settings.dart';
+import '../../../data/services/recording_matcher_service.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/common/app_snackbar.dart';
 import '../../widgets/common/empty_state.dart';
@@ -301,6 +303,9 @@ class _SettingsBody extends ConsumerWidget {
             ],
           ],
         ),
+
+        // Recording Folder
+        const _RecordingFolderSection(),
       ],
     );
   }
@@ -382,6 +387,145 @@ class _TimeFilterRow extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _RecordingFolderSection extends StatefulWidget {
+  const _RecordingFolderSection();
+
+  @override
+  State<_RecordingFolderSection> createState() =>
+      _RecordingFolderSectionState();
+}
+
+class _RecordingFolderSectionState extends State<_RecordingFolderSection> {
+  late TextEditingController _controller;
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _loadPath();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPath() async {
+    final path = await RecordingMatcherService.getFolderPath();
+    if (mounted) {
+      setState(() {
+        _controller.text = path;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _savePath(String value) async {
+    setState(() => _saving = true);
+    await RecordingMatcherService.setFolderPath(value.trim());
+    if (mounted) {
+      setState(() => _saving = false);
+      AppSnackbar.showSuccess(context, 'Recordings folder saved');
+    }
+  }
+
+  Future<void> _browsePath() async {
+    final picked = await FilePicker.platform.getDirectoryPath();
+    if (picked != null) {
+      _controller.text = picked;
+      await _savePath(picked);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SettingsSection(
+      title: 'Recording Folder',
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            AppSpacing.md,
+          ),
+          child: _loading
+              ? const SkeletonBox.fill(height: 48)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Recordings folder path',
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      'Where your call recorder app saves files '
+                      '(default: Samsung built-in dialer)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _controller,
+                            style: Theme.of(context).textTheme.bodySmall,
+                            decoration: InputDecoration(
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.md,
+                                vertical: AppSpacing.sm,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    const BorderSide(color: AppColors.divider),
+                              ),
+                              suffixIcon: _saving
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(12),
+                                      child: SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2),
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                            onSubmitted: _savePath,
+                            textInputAction: TextInputAction.done,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        OutlinedButton(
+                          onPressed: _saving ? null : _browsePath,
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.md,
+                              vertical: AppSpacing.sm,
+                            ),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            foregroundColor: AppColors.primary,
+                            side: const BorderSide(color: AppColors.divider),
+                          ),
+                          child: const Text('Browse'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+        ),
+      ],
     );
   }
 }
